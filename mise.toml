@@ -1,0 +1,22 @@
+[tools]
+node = "24"
+
+[tasks.setup]
+run = "npm ci"
+description = "Install dependencies from package-lock.json"
+
+[tasks.build]
+run = "npm run build"
+description = "Build the TypeScript sources"
+
+[tasks.check]
+run = "npm run check"
+description = "Run TypeScript type checking"
+
+[tasks.test]
+run = "npm test"
+description = "Run the test suite"
+
+[tasks.ci]
+depends = ["check", "test", "build"]
+description = "Run all verification checks"

@@ -1,6 +1,10 @@
 import net from "node:net";
 import { EventEmitter } from "node:events";
 import type { AgentStatus } from "./coordinator.js";
+import {
+  PromptTextDeliveredError,
+  type PromptDeliveryStage,
+} from "./prompt-client.js";
 
 export interface HerdrAgent {
   agent: string;
@@ -30,12 +34,17 @@ type ApiMessage =
 
 export class HerdrClient extends EventEmitter {
   #socketPath: string;
+  #createConnection: (path: string) => net.Socket;
   #subscriptionSocket: net.Socket | undefined;
   #sequence = 0;
 
-  constructor(socketPath: string) {
+  constructor(
+    socketPath: string,
+    createConnection: (path: string) => net.Socket = net.createConnection,
+  ) {
     super();
     this.#socketPath = socketPath;
+    this.#createConnection = createConnection;
   }
 
   close(): void {
@@ -51,9 +60,18 @@ export class HerdrClient extends EventEmitter {
     if (paneIds.length === 0) return;
     if (this.#subscriptionSocket) throw new Error("Already subscribed");
 
-    const socket = net.createConnection(this.#socketPath);
+    const socket = this.#createConnection(this.#socketPath);
     this.#subscriptionSocket = socket;
     const lines = lineReader(socket);
+    let closeEmitted = false;
+    const emitClose = () => {
+      if (closeEmitted) return;
+      closeEmitted = true;
+      if (this.#subscriptionSocket === socket) this.#subscriptionSocket = undefined;
+      this.emit("close");
+    };
+    socket.once("close", emitClose);
+    socket.on("error", (error) => this.emit("socketError", error));
     await onceConnected(socket);
     socket.write(
       `${this.#encode("events.subscribe", {
@@ -69,21 +87,28 @@ export class HerdrClient extends EventEmitter {
     const acknowledgement = parseMessage(first.value);
     if ("error" in acknowledgement) throw apiError(acknowledgement);
 
-    socket.on("close", () => {
-      this.#subscriptionSocket = undefined;
-      this.emit("close");
-    });
-    socket.on("error", (error) => this.emit("socketError", error));
-    void this.#consumeEvents(lines);
+    void this.#consumeEvents(lines, emitClose);
   }
 
-  async sendPrompt(paneId: string, text: string): Promise<void> {
-    await this.request("pane.send_text", { pane_id: paneId, text });
-    await this.request("pane.send_keys", { pane_id: paneId, keys: ["enter"] });
+  async sendPrompt(
+    paneId: string,
+    text: string,
+    stage: PromptDeliveryStage = "full",
+  ): Promise<void> {
+    if (stage === "full") {
+      await this.request("pane.send_text", { pane_id: paneId, text });
+    }
+    try {
+      await this.request("pane.send_keys", { pane_id: paneId, keys: ["enter"] });
+    } catch (error) {
+      throw new PromptTextDeliveredError("prompt text delivered but Enter failed", {
+        cause: error,
+      });
+    }
   }
 
   async request<T>(method: string, params: object): Promise<T> {
-    const socket = net.createConnection(this.#socketPath);
+    const socket = this.#createConnection(this.#socketPath);
     const lines = lineReader(socket);
     await onceConnected(socket);
     socket.end(`${this.#encode(method, params)}\n`);
@@ -103,7 +128,10 @@ export class HerdrClient extends EventEmitter {
     });
   }
 
-  async #consumeEvents(lines: AsyncGenerator<string>): Promise<void> {
+  async #consumeEvents(
+    lines: AsyncGenerator<string>,
+    emitClose: () => void,
+  ): Promise<void> {
     try {
       for await (const line of lines) {
         const message = parseMessage(line);
@@ -111,6 +139,9 @@ export class HerdrClient extends EventEmitter {
       }
     } catch (error) {
       this.emit("protocolError", error);
+      this.#subscriptionSocket?.destroy();
+    } finally {
+      emitClose();
     }
   }
 }

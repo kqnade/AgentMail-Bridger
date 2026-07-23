@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Coordinator } from "../src/coordinator.js";
+import { PromptTextDeliveredError } from "../src/prompt-client.js";
 
 const silent = { info() {}, error() {} };
 
@@ -70,3 +71,146 @@ test("retains queued work when prompt delivery fails", async () => {
   await coordinator.statusChanged("worker", "done");
   assert.deepEqual(coordinator.pending("manager"), ["worker"]);
 });
+
+test("retries a failed delivery while the manager remains idle", async () => {
+  let attempts = 0;
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt() {
+        attempts += 1;
+        if (attempts === 1) throw new Error("offline");
+      },
+    },
+    mappings: [{ worker: "worker", manager: "manager" }],
+    prompt: "{{workers}}",
+    logger: silent,
+    retryDelayMs: 1,
+  });
+  coordinator.setInitialStatus("manager", "idle");
+  coordinator.setInitialStatus("worker", "working");
+
+  await coordinator.statusChanged("worker", "done");
+  await waitFor(() => attempts === 2);
+
+  assert.deepEqual(coordinator.pending("manager"), []);
+});
+
+test("retries only Enter after the prompt text was delivered", async () => {
+  const stages: Array<string | undefined> = [];
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt(_target, _text, stage) {
+        stages.push(stage);
+        if (stages.length === 1) {
+          throw new PromptTextDeliveredError("Enter failed");
+        }
+      },
+    },
+    mappings: [{ worker: "worker", manager: "manager" }],
+    prompt: "{{workers}}",
+    logger: silent,
+    retryDelayMs: 1,
+  });
+  coordinator.setInitialStatus("manager", "idle");
+  coordinator.setInitialStatus("worker", "working");
+
+  await coordinator.statusChanged("worker", "done");
+  await waitFor(() => stages.length === 2);
+
+  assert.deepEqual(stages, ["full", "enter"]);
+  assert.deepEqual(coordinator.pending("manager"), []);
+});
+
+test("resends the full prompt after a connection reset", async () => {
+  const stages: Array<string | undefined> = [];
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt(_target, _text, stage) {
+        stages.push(stage);
+        if (stages.length === 1) {
+          throw new PromptTextDeliveredError("Enter failed");
+        }
+      },
+    },
+    mappings: [{ worker: "worker", manager: "manager" }],
+    prompt: "{{workers}}",
+    logger: silent,
+    retryDelayMs: 60_000,
+  });
+  coordinator.setInitialStatus("manager", "idle");
+  coordinator.setInitialStatus("worker", "working");
+
+  await coordinator.statusChanged("worker", "done");
+  coordinator.resetPartialDeliveries();
+  await coordinator.statusChanged("manager", "idle");
+
+  assert.deepEqual(stages, ["full", "full"]);
+  assert.deepEqual(coordinator.pending("manager"), []);
+});
+
+test("ignores an Enter failure from an older connection generation", async () => {
+  const stages: Array<string | undefined> = [];
+  let rejectFirst: ((error: Error) => void) | undefined;
+  const firstDelivery = new Promise<void>((_resolve, reject) => {
+    rejectFirst = reject;
+  });
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt(_target, _text, stage) {
+        stages.push(stage);
+        if (stages.length === 1) return firstDelivery;
+      },
+    },
+    mappings: [{ worker: "worker", manager: "manager" }],
+    prompt: "{{workers}}",
+    logger: silent,
+    retryDelayMs: 60_000,
+  });
+  coordinator.setInitialStatus("manager", "idle");
+  coordinator.setInitialStatus("worker", "working");
+
+  const delivery = coordinator.statusChanged("worker", "done");
+  coordinator.resetPartialDeliveries();
+  rejectFirst?.(new PromptTextDeliveredError("old connection Enter failed"));
+  await delivery;
+
+  assert.deepEqual(stages, ["full", "full"]);
+  assert.deepEqual(coordinator.pending("manager"), []);
+});
+
+test("ignores successful delivery completion from an older connection generation", async () => {
+  const stages: Array<string | undefined> = [];
+  let resolveFirst: (() => void) | undefined;
+  const firstDelivery = new Promise<void>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt(_target, _text, stage) {
+        stages.push(stage);
+        if (stages.length === 1) return firstDelivery;
+      },
+    },
+    mappings: [{ worker: "worker", manager: "manager" }],
+    prompt: "{{workers}}",
+    logger: silent,
+  });
+  coordinator.setInitialStatus("manager", "idle");
+  coordinator.setInitialStatus("worker", "working");
+
+  const delivery = coordinator.statusChanged("worker", "done");
+  coordinator.resetPartialDeliveries();
+  resolveFirst?.();
+  await delivery;
+
+  assert.deepEqual(stages, ["full", "full"]);
+  assert.deepEqual(coordinator.pending("manager"), []);
+});
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
