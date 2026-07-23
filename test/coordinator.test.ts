@@ -148,6 +148,65 @@ test("resends the full prompt after a connection reset", async () => {
   assert.deepEqual(coordinator.pending("manager"), []);
 });
 
+test("ignores an Enter failure from an older connection generation", async () => {
+  const stages: Array<string | undefined> = [];
+  let rejectFirst: ((error: Error) => void) | undefined;
+  const firstDelivery = new Promise<void>((_resolve, reject) => {
+    rejectFirst = reject;
+  });
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt(_target, _text, stage) {
+        stages.push(stage);
+        if (stages.length === 1) return firstDelivery;
+      },
+    },
+    mappings: [{ worker: "worker", manager: "manager" }],
+    prompt: "{{workers}}",
+    logger: silent,
+    retryDelayMs: 60_000,
+  });
+  coordinator.setInitialStatus("manager", "idle");
+  coordinator.setInitialStatus("worker", "working");
+
+  const delivery = coordinator.statusChanged("worker", "done");
+  coordinator.resetPartialDeliveries();
+  rejectFirst?.(new PromptTextDeliveredError("old connection Enter failed"));
+  await delivery;
+
+  assert.deepEqual(stages, ["full", "full"]);
+  assert.deepEqual(coordinator.pending("manager"), []);
+});
+
+test("ignores successful delivery completion from an older connection generation", async () => {
+  const stages: Array<string | undefined> = [];
+  let resolveFirst: (() => void) | undefined;
+  const firstDelivery = new Promise<void>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt(_target, _text, stage) {
+        stages.push(stage);
+        if (stages.length === 1) return firstDelivery;
+      },
+    },
+    mappings: [{ worker: "worker", manager: "manager" }],
+    prompt: "{{workers}}",
+    logger: silent,
+  });
+  coordinator.setInitialStatus("manager", "idle");
+  coordinator.setInitialStatus("worker", "working");
+
+  const delivery = coordinator.statusChanged("worker", "done");
+  coordinator.resetPartialDeliveries();
+  resolveFirst?.();
+  await delivery;
+
+  assert.deepEqual(stages, ["full", "full"]);
+  assert.deepEqual(coordinator.pending("manager"), []);
+});
+
 async function waitFor(predicate: () => boolean): Promise<void> {
   const deadline = Date.now() + 1_000;
   while (!predicate()) {

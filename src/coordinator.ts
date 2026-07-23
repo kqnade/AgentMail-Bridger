@@ -25,6 +25,7 @@ export class Coordinator {
   #flushing = new Set<string>();
   #retryTimers = new Map<string, NodeJS.Timeout>();
   #retryDelayMs: number;
+  #connectionGeneration = 0;
   #attempts = new Map<
     string,
     { workers: string[]; prompt: string; stage: PromptDeliveryStage }
@@ -82,6 +83,7 @@ export class Coordinator {
   }
 
   resetPartialDeliveries(): void {
+    this.#connectionGeneration += 1;
     for (const attempt of this.#attempts.values()) {
       if (attempt.stage === "enter") attempt.stage = "full";
     }
@@ -104,25 +106,40 @@ export class Coordinator {
       stage: "full" as const,
     };
     this.#attempts.set(manager, attempt);
+    const generation = this.#connectionGeneration;
+    let retryImmediately = false;
     try {
       await this.#client.sendPrompt(manager, attempt.prompt, attempt.stage);
-      for (const worker of attempt.workers) workers.delete(worker);
-      if (workers.size === 0) this.#pending.delete(manager);
-      this.#attempts.delete(manager);
-      this.#logger.info(
-        `sent Agent Mail check prompt: manager=${manager} workers=${attempt.workers.join(",")}`,
-      );
+      if (generation !== this.#connectionGeneration) {
+        attempt.stage = "full";
+        retryImmediately = true;
+      } else {
+        for (const worker of attempt.workers) workers.delete(worker);
+        if (workers.size === 0) this.#pending.delete(manager);
+        this.#attempts.delete(manager);
+        this.#logger.info(
+          `sent Agent Mail check prompt: manager=${manager} workers=${attempt.workers.join(",")}`,
+        );
+      }
     } catch (error) {
-      if (error instanceof PromptTextDeliveredError) attempt.stage = "enter";
+      if (
+        error instanceof PromptTextDeliveredError &&
+        generation === this.#connectionGeneration
+      ) {
+        attempt.stage = "enter";
+      } else if (generation !== this.#connectionGeneration) {
+        attempt.stage = "full";
+        retryImmediately = true;
+      }
       this.#logger.error(
         `failed to prompt manager=${manager}: ${error instanceof Error ? error.message : String(error)}`,
       );
-      this.#scheduleRetry(manager);
+      if (!retryImmediately) this.#scheduleRetry(manager);
     } finally {
       this.#flushing.delete(manager);
     }
 
-    if (!this.#attempts.has(manager) && workers.size > 0) {
+    if (retryImmediately || (!this.#attempts.has(manager) && workers.size > 0)) {
       await this.#flushIfSettled(manager);
     }
   }
