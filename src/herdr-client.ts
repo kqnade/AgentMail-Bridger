@@ -111,6 +111,7 @@ export class HerdrClient extends EventEmitter {
       }
     } catch (error) {
       this.emit("protocolError", error);
+      this.#subscriptionSocket?.destroy();
     }
   }
 }
