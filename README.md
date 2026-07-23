@@ -7,10 +7,19 @@ manager が作業中または入力待ちの場合は通知をキューし、`id
 
 ## 必要条件
 
-- Node.js 20 以降（TypeScript）
+- [mise](https://mise.jdx.dev/)（推奨）
+- Node.js 20 以降（mise 使用時は Node.js 24）
 - Herdr protocol 16
 - manager / worker に一意な Herdr agent 名が付いていること
 - 対象 agent が起動済みであること
+
+## 開発環境
+
+```sh
+mise install
+mise run setup
+mise run ci
+```
 
 ## 設定と起動
 
@@ -46,6 +55,6 @@ npm start
 ## テスト
 
 ```sh
-npm test
-npm run check
+mise run test
+mise run check
 ```
