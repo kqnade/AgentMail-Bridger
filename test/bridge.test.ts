@@ -97,3 +97,43 @@ test("keeps pending notifications when statuses are reconciled after reconnect",
   assert.deepEqual(prompts, [{ target: "manager", text: "Check worker" }]);
   assert.deepEqual(coordinator.pending("manager"), []);
 });
+
+test("installs all manager statuses before reconciling dual-role workers", async () => {
+  const prompts: Array<{ target: string; text: string }> = [];
+  const mappings = [
+    { worker: "worker-a", manager: "manager-b" },
+    { worker: "manager-b", manager: "manager-c" },
+  ];
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt(target, text) {
+        prompts.push({ target, text });
+      },
+    },
+    mappings,
+    prompt: "Check {{workers}}",
+  });
+  const lookup = new Map([
+    ["worker-a", "p1"],
+    ["manager-b", "p2"],
+    ["manager-c", "p3"],
+  ]);
+  coordinator.setInitialStatus("worker-a", "working");
+  coordinator.setInitialStatus("manager-b", "working");
+  coordinator.setInitialStatus("manager-c", "idle");
+
+  await reconcileStatuses(
+    coordinator,
+    [
+      { agent: "codex", name: "worker-a", pane_id: "p1", agent_status: "working" },
+      { agent: "codex", name: "manager-b", pane_id: "p2", agent_status: "done" },
+      { agent: "codex", name: "manager-c", pane_id: "p3", agent_status: "working" },
+    ],
+    lookup,
+    mappings,
+    false,
+  );
+
+  assert.deepEqual(prompts, []);
+  assert.deepEqual(coordinator.pending("manager-c"), ["manager-b"]);
+});

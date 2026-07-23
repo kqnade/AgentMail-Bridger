@@ -140,12 +140,18 @@ export async function reconcileStatuses(
     ...[...lookup.keys()].filter((target) => !managers.has(target)),
   ];
 
-  for (const target of orderedTargets) {
+  const statuses = orderedTargets.flatMap((target) => {
     const paneId = lookup.get(target);
     const agent = agents.find((candidate) => candidate.pane_id === paneId);
-    if (!agent) continue;
-    if (initialize) coordinator.setInitialStatus(target, agent.agent_status);
-    else await coordinator.statusChanged(target, agent.agent_status);
+    return agent ? [{ target, status: agent.agent_status }] : [];
+  });
+
+  if (initialize) {
+    for (const { target, status } of statuses) {
+      coordinator.setInitialStatus(target, status);
+    }
+  } else {
+    await coordinator.statusesChanged(statuses);
   }
 }
 

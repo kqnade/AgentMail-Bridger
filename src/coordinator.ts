@@ -63,7 +63,27 @@ export class Coordinator {
   async statusChanged(target: string, status: AgentStatus): Promise<void> {
     const previous = this.#statuses.get(target);
     this.#statuses.set(target, status);
+    await this.#reactToStatusChange(target, status, previous);
+  }
 
+  async statusesChanged(
+    changes: Array<{ target: string; status: AgentStatus }>,
+  ): Promise<void> {
+    const previous = new Map<string, AgentStatus | undefined>();
+    for (const { target, status } of changes) {
+      previous.set(target, this.#statuses.get(target));
+      this.#statuses.set(target, status);
+    }
+    for (const { target, status } of changes) {
+      await this.#reactToStatusChange(target, status, previous.get(target));
+    }
+  }
+
+  async #reactToStatusChange(
+    target: string,
+    status: AgentStatus,
+    previous: AgentStatus | undefined,
+  ): Promise<void> {
     if (this.#workers.has(target) && status === "done" && previous !== "done") {
       const manager = this.#workers.get(target);
       if (!manager) return;
