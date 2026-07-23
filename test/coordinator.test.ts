@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Coordinator } from "../src/coordinator.js";
+import { PromptTextDeliveredError } from "../src/prompt-client.js";
 
 const silent = { info() {}, error() {} };
 
@@ -91,6 +92,32 @@ test("retries a failed delivery while the manager remains idle", async () => {
   await coordinator.statusChanged("worker", "done");
   await waitFor(() => attempts === 2);
 
+  assert.deepEqual(coordinator.pending("manager"), []);
+});
+
+test("retries only Enter after the prompt text was delivered", async () => {
+  const stages: Array<string | undefined> = [];
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt(_target, _text, stage) {
+        stages.push(stage);
+        if (stages.length === 1) {
+          throw new PromptTextDeliveredError("Enter failed");
+        }
+      },
+    },
+    mappings: [{ worker: "worker", manager: "manager" }],
+    prompt: "{{workers}}",
+    logger: silent,
+    retryDelayMs: 1,
+  });
+  coordinator.setInitialStatus("manager", "idle");
+  coordinator.setInitialStatus("worker", "working");
+
+  await coordinator.statusChanged("worker", "done");
+  await waitFor(() => stages.length === 2);
+
+  assert.deepEqual(stages, ["full", "enter"]);
   assert.deepEqual(coordinator.pending("manager"), []);
 });
 

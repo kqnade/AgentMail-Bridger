@@ -1,6 +1,10 @@
 import net from "node:net";
 import { EventEmitter } from "node:events";
 import type { AgentStatus } from "./coordinator.js";
+import {
+  PromptTextDeliveredError,
+  type PromptDeliveryStage,
+} from "./prompt-client.js";
 
 export interface HerdrAgent {
   agent: string;
@@ -77,9 +81,21 @@ export class HerdrClient extends EventEmitter {
     void this.#consumeEvents(lines);
   }
 
-  async sendPrompt(paneId: string, text: string): Promise<void> {
-    await this.request("pane.send_text", { pane_id: paneId, text });
-    await this.request("pane.send_keys", { pane_id: paneId, keys: ["enter"] });
+  async sendPrompt(
+    paneId: string,
+    text: string,
+    stage: PromptDeliveryStage = "full",
+  ): Promise<void> {
+    if (stage === "full") {
+      await this.request("pane.send_text", { pane_id: paneId, text });
+    }
+    try {
+      await this.request("pane.send_keys", { pane_id: paneId, keys: ["enter"] });
+    } catch (error) {
+      throw new PromptTextDeliveredError("prompt text delivered but Enter failed", {
+        cause: error,
+      });
+    }
   }
 
   async request<T>(method: string, params: object): Promise<T> {

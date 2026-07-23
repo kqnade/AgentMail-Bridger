@@ -1,12 +1,13 @@
 import type { Mapping } from "./config.js";
+import {
+  PromptTextDeliveredError,
+  type PromptClient,
+  type PromptDeliveryStage,
+} from "./prompt-client.js";
 
 const SETTLED = new Set<AgentStatus>(["idle", "done"]);
 
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
-
-interface PromptClient {
-  sendPrompt(target: string, text: string): Promise<void>;
-}
 
 interface Logger {
   info(message: string): void;
@@ -24,6 +25,10 @@ export class Coordinator {
   #flushing = new Set<string>();
   #retryTimers = new Map<string, NodeJS.Timeout>();
   #retryDelayMs: number;
+  #attempts = new Map<
+    string,
+    { workers: string[]; prompt: string; stage: PromptDeliveryStage }
+  >();
 
   constructor({
     client,
@@ -87,22 +92,32 @@ export class Coordinator {
       this.#retryTimers.delete(manager);
     }
     this.#flushing.add(manager);
-    const batch = [...workers];
+    const attempt = this.#attempts.get(manager) ?? {
+      workers: [...workers],
+      prompt: this.#promptTemplate.replaceAll("{{workers}}", [...workers].join(", ")),
+      stage: "full" as const,
+    };
+    this.#attempts.set(manager, attempt);
     try {
-      const prompt = this.#promptTemplate.replaceAll("{{workers}}", batch.join(", "));
-      await this.#client.sendPrompt(manager, prompt);
-      for (const worker of batch) workers.delete(worker);
+      await this.#client.sendPrompt(manager, attempt.prompt, attempt.stage);
+      for (const worker of attempt.workers) workers.delete(worker);
       if (workers.size === 0) this.#pending.delete(manager);
+      this.#attempts.delete(manager);
       this.#logger.info(
-        `sent Agent Mail check prompt: manager=${manager} workers=${batch.join(",")}`,
+        `sent Agent Mail check prompt: manager=${manager} workers=${attempt.workers.join(",")}`,
       );
     } catch (error) {
+      if (error instanceof PromptTextDeliveredError) attempt.stage = "enter";
       this.#logger.error(
         `failed to prompt manager=${manager}: ${error instanceof Error ? error.message : String(error)}`,
       );
       this.#scheduleRetry(manager);
     } finally {
       this.#flushing.delete(manager);
+    }
+
+    if (!this.#attempts.has(manager) && workers.size > 0) {
+      await this.#flushIfSettled(manager);
     }
   }
 

@@ -49,13 +49,13 @@ export class Bridge {
       const initialize = !this.#coordinator;
       this.#coordinator ??= new Coordinator({
         client: {
-          sendPrompt: (target, text) => {
+          sendPrompt: (target, text, stage) => {
             const activeClient = this.#client;
             const paneId = this.#lookup.get(target);
             if (!activeClient || !paneId) {
               throw new Error(`target is not present in the active Herdr snapshot: ${target}`);
             }
-            return activeClient.sendPrompt(paneId, text);
+            return activeClient.sendPrompt(paneId, text, stage);
           },
         },
         mappings: this.#config.mappings,
