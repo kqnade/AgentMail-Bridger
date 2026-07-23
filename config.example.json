@@ -1,0 +1,14 @@
+{
+  "socketPath": "/Users/you/.config/herdr/herdr.sock",
+  "prompt": "Worker {{workers}} completed. Check Agent Mail now, collect their replies, and continue coordinating the task.",
+  "mappings": [
+    {
+      "worker": "implementation-worker",
+      "manager": "manager"
+    },
+    {
+      "worker": "review-worker",
+      "manager": "manager"
+    }
+  ]
+}

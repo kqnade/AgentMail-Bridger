@@ -1,0 +1,24 @@
+{
+  "name": "agentmail-bridger",
+  "version": "0.1.0",
+  "description": "Bridge Herdr agent completion events to Agent Mail check prompts.",
+  "type": "module",
+  "bin": {
+    "agentmail-bridger": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node --import tsx src/cli.ts",
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
