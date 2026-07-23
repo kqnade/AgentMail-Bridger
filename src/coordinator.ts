@@ -22,21 +22,26 @@ export class Coordinator {
   #statuses = new Map<string, AgentStatus>();
   #pending = new Map<string, Set<string>>();
   #flushing = new Set<string>();
+  #retryTimers = new Map<string, NodeJS.Timeout>();
+  #retryDelayMs: number;
 
   constructor({
     client,
     mappings,
     prompt,
     logger = console,
+    retryDelayMs = 1_000,
   }: {
     client: PromptClient;
     mappings: Mapping[];
     prompt: string;
     logger?: Logger;
+    retryDelayMs?: number;
   }) {
     this.#client = client;
     this.#logger = logger;
     this.#promptTemplate = prompt;
+    this.#retryDelayMs = retryDelayMs;
 
     for (const { worker, manager } of mappings) {
       this.#workers.set(worker, manager);
@@ -76,6 +81,11 @@ export class Coordinator {
     if (!workers?.size || !SETTLED.has(this.#statuses.get(manager) ?? "unknown")) return;
     if (this.#flushing.has(manager)) return;
 
+    const retryTimer = this.#retryTimers.get(manager);
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      this.#retryTimers.delete(manager);
+    }
     this.#flushing.add(manager);
     const batch = [...workers];
     try {
@@ -90,8 +100,19 @@ export class Coordinator {
       this.#logger.error(
         `failed to prompt manager=${manager}: ${error instanceof Error ? error.message : String(error)}`,
       );
+      this.#scheduleRetry(manager);
     } finally {
       this.#flushing.delete(manager);
     }
+  }
+
+  #scheduleRetry(manager: string): void {
+    if (this.#retryTimers.has(manager)) return;
+    const timer = setTimeout(() => {
+      this.#retryTimers.delete(manager);
+      void this.#flushIfSettled(manager);
+    }, this.#retryDelayMs);
+    timer.unref();
+    this.#retryTimers.set(manager, timer);
   }
 }

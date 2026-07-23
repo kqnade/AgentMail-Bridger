@@ -70,3 +70,34 @@ test("retains queued work when prompt delivery fails", async () => {
   await coordinator.statusChanged("worker", "done");
   assert.deepEqual(coordinator.pending("manager"), ["worker"]);
 });
+
+test("retries a failed delivery while the manager remains idle", async () => {
+  let attempts = 0;
+  const coordinator = new Coordinator({
+    client: {
+      async sendPrompt() {
+        attempts += 1;
+        if (attempts === 1) throw new Error("offline");
+      },
+    },
+    mappings: [{ worker: "worker", manager: "manager" }],
+    prompt: "{{workers}}",
+    logger: silent,
+    retryDelayMs: 1,
+  });
+  coordinator.setInitialStatus("manager", "idle");
+  coordinator.setInitialStatus("worker", "working");
+
+  await coordinator.statusChanged("worker", "done");
+  await waitFor(() => attempts === 2);
+
+  assert.deepEqual(coordinator.pending("manager"), []);
+});
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
