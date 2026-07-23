@@ -27,14 +27,14 @@ mise run ci
 
 ```sh
 cp config.example.json config.json
-npm start -- --config config.json
+mise exec -- npm start -- --config config.json
 ```
 
 または環境変数だけでも起動できます。
 
 ```sh
 export AGENTMAIL_BRIDGER_MAPPINGS='worker-a:manager,worker-b:manager'
-npm start
+mise exec -- npm start
 ```
 
 ソケットは `socketPath`、`HERDR_SOCKET_PATH`、
