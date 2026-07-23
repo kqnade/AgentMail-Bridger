@@ -7,6 +7,11 @@ interface Logger {
   error(message: string): void;
 }
 
+interface BufferedStatusEvent {
+  target: string;
+  status: StatusEvent["data"]["agent_status"];
+}
+
 export class Bridge {
   #config: Config;
   #logger: Logger;
@@ -73,8 +78,7 @@ export class Bridge {
       );
 
       const paneTargets = new Map([...this.#lookup].map(([target, paneId]) => [paneId, target]));
-      const bufferedEvents: Array<{ target: string; status: StatusEvent["data"]["agent_status"] }> =
-        [];
+      const bufferedEvents: BufferedStatusEvent[] = [];
       let reconciling = true;
       let eventChain = Promise.resolve();
       client.on("event", (event: StatusEvent) => {
@@ -111,7 +115,11 @@ export class Bridge {
         false,
       );
       reconciling = false;
-      for (const event of bufferedEvents) {
+      for (const event of eventsAfterSnapshot(
+        bufferedEvents,
+        subscribedSnapshot.agents,
+        subscribedLookup,
+      )) {
         eventChain = eventChain.then(async () => {
           await this.#coordinator?.statusChanged(event.target, event.status);
         });
@@ -125,6 +133,30 @@ export class Bridge {
       if (this.#client === client) this.#client = undefined;
     }
   }
+}
+
+export function eventsAfterSnapshot(
+  events: BufferedStatusEvent[],
+  agents: HerdrAgent[],
+  lookup: Map<string, string>,
+): BufferedStatusEvent[] {
+  const snapshotStatuses = new Map(
+    [...lookup].flatMap(([target, paneId]) => {
+      const agent = agents.find((candidate) => candidate.pane_id === paneId);
+      return agent ? [[target, agent.agent_status] as const] : [];
+    }),
+  );
+  const representedThrough = new Map<string, number>();
+
+  for (const [index, event] of events.entries()) {
+    if (snapshotStatuses.get(event.target) === event.status) {
+      representedThrough.set(event.target, index);
+    }
+  }
+
+  return events.filter(
+    (event, index) => index > (representedThrough.get(event.target) ?? -1),
+  );
 }
 
 export async function reconcileStatuses(

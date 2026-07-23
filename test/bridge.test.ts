@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildTargetLookup, reconcileStatuses } from "../src/bridge.js";
+import {
+  buildTargetLookup,
+  eventsAfterSnapshot,
+  reconcileStatuses,
+} from "../src/bridge.js";
 import { Coordinator } from "../src/coordinator.js";
 
 test("resolves configured names and pane ids", () => {
@@ -136,4 +140,35 @@ test("installs all manager statuses before reconciling dual-role workers", async
 
   assert.deepEqual(prompts, []);
   assert.deepEqual(coordinator.pending("manager-c"), ["manager-b"]);
+});
+
+test("does not replay buffered transitions already represented by the snapshot", async () => {
+  const events = [
+    { target: "worker", status: "working" as const },
+    { target: "worker", status: "done" as const },
+  ];
+  const agents = [
+    { agent: "codex", name: "worker", pane_id: "p1", agent_status: "done" as const },
+  ];
+
+  assert.deepEqual(
+    eventsAfterSnapshot(events, agents, new Map([["worker", "p1"]])),
+    [],
+  );
+});
+
+test("replays buffered transitions that follow the snapshot state", async () => {
+  const events = [
+    { target: "worker", status: "working" as const },
+    { target: "worker", status: "done" as const },
+    { target: "worker", status: "working" as const },
+  ];
+  const agents = [
+    { agent: "codex", name: "worker", pane_id: "p1", agent_status: "done" as const },
+  ];
+
+  assert.deepEqual(
+    eventsAfterSnapshot(events, agents, new Map([["worker", "p1"]])),
+    [{ target: "worker", status: "working" }],
+  );
 });
