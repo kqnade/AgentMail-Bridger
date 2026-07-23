@@ -35,10 +35,15 @@ export async function loadConfig(
     );
   }
 
+  const workers = new Set<string>();
   for (const [index, mapping] of mappings.entries()) {
     if (!mapping || typeof mapping.worker !== "string" || typeof mapping.manager !== "string") {
       throw new Error(`mappings[${index}] must contain string worker and manager targets`);
     }
+    if (workers.has(mapping.worker)) {
+      throw new Error(`Duplicate worker mapping: ${mapping.worker}`);
+    }
+    workers.add(mapping.worker);
   }
 
   return {
