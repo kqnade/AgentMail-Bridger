@@ -62,6 +62,7 @@ export class Bridge {
         prompt: this.#config.prompt,
         logger: this.#logger,
       });
+      this.#coordinator.resetPartialDeliveries();
 
       await reconcileStatuses(
         this.#coordinator,

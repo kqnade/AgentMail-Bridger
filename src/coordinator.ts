@@ -81,6 +81,12 @@ export class Coordinator {
     return [...(this.#pending.get(manager) ?? [])];
   }
 
+  resetPartialDeliveries(): void {
+    for (const attempt of this.#attempts.values()) {
+      if (attempt.stage === "enter") attempt.stage = "full";
+    }
+  }
+
   async #flushIfSettled(manager: string): Promise<void> {
     const workers = this.#pending.get(manager);
     if (!workers?.size || !SETTLED.has(this.#statuses.get(manager) ?? "unknown")) return;
