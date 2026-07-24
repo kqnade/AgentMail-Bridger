@@ -13,6 +13,16 @@ manager が作業中または入力待ちの場合は通知をキューし、`id
 - manager / worker に一意な Herdr agent 名が付いていること
 - 対象 agent が起動済みであること
 
+## インストール
+
+npm パッケージとしてグローバルにインストールします。
+
+```sh
+npm install --global agentmail-bridger
+```
+
+インストール後は `agentmail-bridger` コマンドを実行できます。
+
 ## 開発環境
 
 ```sh
@@ -27,14 +37,14 @@ mise run ci
 
 ```sh
 cp config.example.json config.json
-mise exec -- npm start -- --config config.json
+agentmail-bridger --config config.json
 ```
 
 または環境変数だけでも起動できます。
 
 ```sh
 export AGENTMAIL_BRIDGER_MAPPINGS='worker-a:manager,worker-b:manager'
-mise exec -- npm start
+agentmail-bridger
 ```
 
 ソケットは `socketPath`、`HERDR_SOCKET_PATH`、
