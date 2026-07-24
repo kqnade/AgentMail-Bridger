@@ -1,6 +1,6 @@
 {
   "name": "agentmail-bridger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Bridge Herdr agent completion events to Agent Mail check prompts.",
   "type": "module",
   "files": [
